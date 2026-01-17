@@ -8,4 +8,4 @@ numpy<2
 pillow
 pandas
 pyyaml
-gdown
+requests
