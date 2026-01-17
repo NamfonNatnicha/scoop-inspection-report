@@ -1,10 +1,8 @@
 streamlit
 streamlit-autorefresh
-
-ultralytics==8.3.96
-
-opencv-python-headless==4.10.0.84
+ultralytics==8.0.196
+opencv-python-headless==4.8.1.78
 numpy<2
+pillow
 pandas
-Pillow
 pyyaml
