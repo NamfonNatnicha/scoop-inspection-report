@@ -8,9 +8,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_autorefresh import st_autorefresh
 
-import sys
-st.sidebar.write(sys.version)
-
 import yaml
 import pandas as pd
 from PIL import Image
