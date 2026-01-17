@@ -13,24 +13,14 @@ import pandas as pd
 from PIL import Image
 
 from ultralytics import YOLO
-import os
-import requests
-import streamlit as st
-from ultralytics import YOLO
+import gdown
 
-GDRIVE_FILE_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
 
-@st.cache_resource
-def load_model_from_gdrive(file_id: str, local_path: str = "best.pt"):
-    if not os.path.exists(local_path):
-        url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        r = requests.get(url, stream=True)
-        r.raise_for_status()
-        with open(local_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-    return YOLO(local_path)
+# ============================
+# Google Drive Model Config
+# ============================
+MODEL_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
+MODEL_PATH = Path("models/best.pt")
 
 
 # ----------------------------
@@ -52,14 +42,7 @@ def newest_file(folder: Path):
     return max(files, key=lambda x: x.stat().st_mtime)
 
 
-def list_images_sorted(folder: Path):
-    imgs = [p for p in folder.glob("*") if p.is_file() and is_image_file(p)]
-    imgs.sort(key=lambda x: x.stat().st_mtime)
-    return imgs
-
-
 def safe_read_image(path: Path) -> Image.Image:
-    # handle "file still being copied"
     for _ in range(6):
         try:
             return Image.open(path).convert("RGB")
@@ -91,7 +74,6 @@ def append_result_csv(csv_path: Path, row: dict):
 
 
 def maybe_rotate_log(csv_path: Path, archive_dir: Path, max_mb: int = 10, max_rows: int = 200_000):
-    """Auto-archive results.csv if it gets too large."""
     if not csv_path.exists():
         return
     try:
@@ -99,7 +81,6 @@ def maybe_rotate_log(csv_path: Path, archive_dir: Path, max_mb: int = 10, max_ro
         rotate = size_mb >= max_mb
 
         if not rotate:
-            # lightweight row count check (fine for DEMO)
             try:
                 rows = sum(1 for _ in open(csv_path, "rb")) - 1
                 rotate = rows >= max_rows
@@ -142,19 +123,13 @@ def play_fail_beep():
 
 def popup_alert(message: str):
     st.toast(f"🚨 {message}", icon="🚨")
-    # ❌ เอา alert() ออก เพราะมัน block autorefresh
-
-
-
-def popup_info(message: str):
-    st.toast(message, icon="ℹ️")
 
 
 def run_inference_and_save(model: YOLO, img_path: Path, processed_dir: Path, conf: float, iou: float, imgsz: int):
     results = model.predict(source=str(img_path), conf=conf, iou=iou, imgsz=imgsz, verbose=False)
     r = results[0]
 
-    annotated = r.plot()              # BGR numpy
+    annotated = r.plot()  # BGR numpy
     annotated_rgb = annotated[:, :, ::-1]
     out_img = Image.fromarray(annotated_rgb)
 
@@ -214,7 +189,6 @@ def decide_status(dets, class_names, expected_color: str, multiple_policy: str):
     return ("PASS", f"Correct color: {best_label}", best_label, detected_all, best_conf)
 
 
-
 def load_profiles(path: Path):
     if not path.exists():
         return {}
@@ -229,86 +203,108 @@ def save_profiles(path: Path, profiles: dict):
 
 
 def reset_soft():
+    st.session_state["last_alert_key"] = None
     st.session_state["current_status"] = None
     st.session_state["current_reason"] = None
-    st.session_state["current_file"] = None
     st.session_state["current_ts"] = None
-    st.session_state["last_alert_key"] = None
 
 
-def hard_reset(processed_dir: Path, results_csv: Path):
-    # archive results instead of deleting
+def hard_reset(upload_dir: Path, processed_dir: Path, results_csv: Path):
     if results_csv.exists():
         arch_dir = Path("archive")
         ensure_dirs(arch_dir)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         shutil.move(str(results_csv), str(arch_dir / f"results_{ts}.csv"))
 
-    # clear processed
+    # clear upload dir
+    if upload_dir.exists():
+        for p in upload_dir.glob("*"):
+            if p.is_file():
+                p.unlink(missing_ok=True)
+
+    # clear processed dir
     if processed_dir.exists():
         for p in processed_dir.glob("*"):
             if p.is_file():
                 p.unlink(missing_ok=True)
 
+    # clear queue
+    st.session_state["queue_files"] = []
     reset_soft()
 
 
-# ----------------------------
-# App
-# ----------------------------
-st.set_page_config(page_title="Scoop Inspection Report", layout="wide")
+# ============================
+# Model Loading (Drive, cached)
+# ============================
+@st.cache_resource
+def load_model_from_drive() -> YOLO:
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# refresh every 3 seconds (no sleep)
+    if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 5_000_000:
+        return YOLO(str(MODEL_PATH))
+
+    url = f"https://drive.google.com/uc?id={MODEL_ID}"
+    gdown.download(url, str(MODEL_PATH), quiet=False)
+
+    if not MODEL_PATH.exists() or MODEL_PATH.stat().st_size < 5_000_000:
+        raise RuntimeError("Model download failed or file is too small (possibly blocked/HTML).")
+
+    head = MODEL_PATH.read_bytes()[:32]
+    if b"<html" in head.lower():
+        raise RuntimeError("Downloaded file looks like HTML. Check Drive sharing permission (Anyone with link).")
+
+    return YOLO(str(MODEL_PATH))
+
+
+# ============================
+# App
+# ============================
+st.set_page_config(page_title="Spoon inspection report", layout="wide")
+
+# refresh every 3 seconds
 st_autorefresh(interval=3000, key="refresh_3s")
 
-st.title("🥄 Scoop Inspection Report")
+st.title("🥄 Spoon inspection report")
 
-# session state
+# session state defaults
 st.session_state.setdefault("run_mode", True)
 st.session_state.setdefault("confirm_hard", False)
 st.session_state.setdefault("last_alert_key", None)
-st.session_state.setdefault("current_status", None)
-st.session_state.setdefault("current_reason", None)
-st.session_state.setdefault("current_file", None)
-st.session_state.setdefault("current_ts", None)
+st.session_state.setdefault("queue_files", [])  # list[str] of saved filenames in upload dir
 
 # Paths
-MODEL_PATH_DEFAULT = "models/best.pt"
 YAML_PATH_DEFAULT = "data.yaml"
 PROFILES_PATH = Path("profiles.json")
 
-INCOMING_DIR = Path("incoming")
+UPLOAD_DIR = Path("incoming_upload")
 PROCESSED_DIR = Path("processed")
 RESULTS_CSV = Path("results/results.csv")
 ARCHIVE_DIR = Path("archive")
 
-ensure_dirs(INCOMING_DIR, PROCESSED_DIR, RESULTS_CSV.parent, ARCHIVE_DIR)
+ensure_dirs(UPLOAD_DIR, PROCESSED_DIR, RESULTS_CSV.parent, ARCHIVE_DIR)
 
 # profiles
 profiles = load_profiles(PROFILES_PATH)
 
 # ----------------------------
-# Sidebar: controls
+# Sidebar controls
 # ----------------------------
 st.sidebar.header("🧰 Control Panel")
 
-# Start/Stop
 c1, c2 = st.sidebar.columns(2)
 with c1:
-    if st.button("▶️ Start", use_container_width=True):
+    if st.sidebar.button("▶️ Start", use_container_width=True):
         st.session_state["run_mode"] = True
 with c2:
-    if st.button("⏸ Stop", use_container_width=True):
+    if st.sidebar.button("⏸ Stop", use_container_width=True):
         st.session_state["run_mode"] = False
 
 st.sidebar.write(f"Status: {'RUNNING' if st.session_state['run_mode'] else 'STOPPED'}")
 st.sidebar.divider()
 
-# Product selector
 product_list = ["Product A", "Product B", "Product C"]
 product = st.sidebar.selectbox("Product", product_list, index=0)
 
-# ensure profile exists
 DEFAULT_EXPECTED = {"Product A": "Blue", "Product B": "Green", "Product C": "White"}
 if product not in profiles:
     profiles[product] = {
@@ -320,22 +316,20 @@ if product not in profiles:
         "alert_on_no_object": False,
     }
 
-# Paths config
-model_path = Path(st.sidebar.text_input("Model path", MODEL_PATH_DEFAULT))
 yaml_path = Path(st.sidebar.text_input("YAML path (optional)", YAML_PATH_DEFAULT))
-
-# class names from yaml (fallback later)
 class_names = load_class_names_from_yaml(yaml_path)
 
 expected_color = profiles[product]["expected_color"]
 st.sidebar.caption(f"Expected color: **{expected_color}**")
 
-# Per-product thresholds
 st.sidebar.subheader("Thresholds (per product)")
 conf = st.sidebar.slider("Confidence (conf)", 0.05, 0.95, float(profiles[product]["conf"]), 0.05)
 iou = st.sidebar.slider("IoU", 0.10, 0.90, float(profiles[product]["iou"]), 0.05)
-imgsz = st.sidebar.selectbox("Image size (imgsz)", [320, 480, 640, 800, 960],
-                             index=[320, 480, 640, 800, 960].index(int(profiles[product]["imgsz"])))
+imgsz = st.sidebar.selectbox(
+    "Image size (imgsz)",
+    [320, 480, 640, 800, 960],
+    index=[320, 480, 640, 800, 960].index(int(profiles[product]["imgsz"])),
+)
 
 multiple_policy_label = st.sidebar.selectbox(
     "Multiple detections handling",
@@ -344,22 +338,18 @@ multiple_policy_label = st.sidebar.selectbox(
 )
 multiple_policy = "FAIL_IF_MULTIPLE" if multiple_policy_label.startswith("Fail") else "BEST_ONLY"
 
-alert_on_no_object = st.sidebar.checkbox("Alert on NO OBJECT", value=bool(profiles[product].get("alert_on_no_object", False)))
-
-# Save/Reset profile
 st.sidebar.divider()
 p1, p2 = st.sidebar.columns(2)
 with p1:
-    if st.button("💾 Save profile", use_container_width=True):
+    if st.sidebar.button("💾 Save profile", use_container_width=True):
         profiles[product]["conf"] = float(conf)
         profiles[product]["iou"] = float(iou)
         profiles[product]["imgsz"] = int(imgsz)
         profiles[product]["multiple_policy"] = multiple_policy
-        profiles[product]["alert_on_no_object"] = bool(alert_on_no_object)
         save_profiles(PROFILES_PATH, profiles)
         st.sidebar.success("Saved")
 with p2:
-    if st.button("↩️ Reset profile", use_container_width=True):
+    if st.sidebar.button("↩️ Reset profile", use_container_width=True):
         profiles[product] = {
             "expected_color": DEFAULT_EXPECTED[product],
             "conf": 0.50 if product != "Product C" else 0.55,
@@ -371,60 +361,54 @@ with p2:
         save_profiles(PROFILES_PATH, profiles)
         st.sidebar.warning("Reset to default")
 
-# Reset buttons
 st.sidebar.divider()
 st.sidebar.subheader("Reset")
 r1, r2 = st.sidebar.columns(2)
 with r1:
-    if st.button("🧽 Soft Reset", use_container_width=True):
+    if st.sidebar.button("🧽 Soft Reset", use_container_width=True):
         reset_soft()
         st.sidebar.success("Soft reset done")
 with r2:
-    if st.button("🧨 Hard Reset", use_container_width=True):
+    if st.sidebar.button("🧨 Hard Reset", use_container_width=True):
         st.session_state["confirm_hard"] = True
 
 if st.session_state.get("confirm_hard", False):
-    st.sidebar.warning("Hard Reset will clear processed images and archive current results log.")
+    st.sidebar.warning("Hard Reset will clear processed images, uploaded queue, and archive results log.")
     cf1, cf2 = st.sidebar.columns(2)
     with cf1:
-        if st.button("✅ Confirm Hard Reset", use_container_width=True):
-            hard_reset(PROCESSED_DIR, RESULTS_CSV)
+        if st.sidebar.button("✅ Confirm Hard Reset", use_container_width=True):
+            hard_reset(UPLOAD_DIR, PROCESSED_DIR, RESULTS_CSV)
             st.session_state["confirm_hard"] = False
             st.sidebar.success("Hard reset done")
     with cf2:
-        if st.button("❌ Cancel", use_container_width=True):
+        if st.sidebar.button("❌ Cancel", use_container_width=True):
             st.session_state["confirm_hard"] = False
 
-st.sidebar.divider()
-st.sidebar.caption("Copy images into **incoming/** to simulate camera snapshots.")
+# ----------------------------
+# Upload (multi) -> queue
+# ----------------------------
+st.subheader("📤 Upload images (multiple)")
+uploaded_files = st.file_uploader(
+    "Upload multiple images. The system will process them one-by-one automatically after you press Start.",
+    type=["jpg", "jpeg", "png", "bmp", "webp"],
+    accept_multiple_files=True,
+    label_visibility="collapsed",
+)
 
+# Save new uploads to UPLOAD_DIR and add to queue (avoid duplicates)
+if uploaded_files:
+    for uf in uploaded_files:
+        ext = Path(uf.name).suffix.lower()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        save_name = f"img_{ts}{ext}"  # DO NOT expose original filename
+        save_path = UPLOAD_DIR / save_name
+        if not save_path.exists():
+            save_path.write_bytes(uf.getbuffer())
+            st.session_state["queue_files"].append(save_name)
 
-# ------------------------------
-# Model loading (Google Drive)
-# ------------------------------
-import gdown
-from pathlib import Path
-
-MODEL_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
-MODEL_PATH = Path("models/best.pt")
-
-@st.cache_resource
-def load_model_from_drive():
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    # ถ้ามีไฟล์แล้ว และขนาดดูปกติ ไม่ต้องโหลดใหม่
-    if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 5_000_000:
-        return YOLO(str(MODEL_PATH))
-
-    url = f"https://drive.google.com/uc?id={MODEL_ID}"
-    gdown.download(url, str(MODEL_PATH), quiet=False)
-
-    if not MODEL_PATH.exists() or MODEL_PATH.stat().st_size < 5_000_000:
-        raise RuntimeError("❌ Model download failed or file is corrupted")
-
-    return YOLO(str(MODEL_PATH))
-
-
+# ----------------------------
+# Load model
+# ----------------------------
 model = load_model_from_drive()
 
 # class_names fallback from model
@@ -437,20 +421,18 @@ if not class_names:
     else:
         class_names = ["Blue", "Green", "White"]
 
-
 # ----------------------------
-# Folder Watch Processing (Queue only)
+# Processing loop (one image per refresh)
 # ----------------------------
-incoming_images = list_images_sorted(INCOMING_DIR)
-
-def pick_next_image_queue():
-    # เลือกไฟล์ที่ยังไม่ถูก process (oldest first)
-    for p in incoming_images:
-        if not (PROCESSED_DIR / p.name).exists():
-            return p
+def pick_next_from_queue():
+    for fname in st.session_state.get("queue_files", []):
+        src = UPLOAD_DIR / fname
+        if src.exists() and not (PROCESSED_DIR / fname).exists():
+            return src
     return None
 
-img_to_process = pick_next_image_queue()
+
+img_to_process = pick_next_from_queue()
 
 if st.session_state["run_mode"] and img_to_process is not None:
     try:
@@ -477,7 +459,7 @@ if st.session_state["run_mode"] and img_to_process is not None:
             RESULTS_CSV,
             {
                 "timestamp": now_str,
-                "file": img_to_process.name,
+                "file": img_to_process.name,  # internal name only (not original)
                 "product": product,
                 "expected_color": expected_color,
                 "detected_best": detected_best if detected_best else "",
@@ -493,7 +475,7 @@ if st.session_state["run_mode"] and img_to_process is not None:
             },
         )
 
-        # alert (ไม่ซ้ำ)
+        # alert (no duplicate)
         alert_key = f"{now_str}|{img_to_process.name}|{status}|{reason}"
         if alert_key != st.session_state.get("last_alert_key"):
             if status == "FAIL":
@@ -504,12 +486,10 @@ if st.session_state["run_mode"] and img_to_process is not None:
     except Exception as e:
         st.error(f"❌ Inference error: {e}")
 
-total = len(incoming_images)
-done = sum(1 for p in incoming_images if (PROCESSED_DIR / p.name).exists())
-
 # ----------------------------
 # UI
 # ----------------------------
+st.divider()
 col_left, col_right = st.columns([2, 1], vertical_alignment="top")
 
 with col_left:
@@ -518,7 +498,7 @@ with col_left:
     if latest_processed and is_image_file(latest_processed):
         st.image(safe_read_image(latest_processed), use_container_width=True)
     else:
-        st.info("No processed image yet. Drop/copy an image into the incoming folder.")
+        st.info("No processed image yet. Upload images above, then press Start.")
 
 with col_right:
     st.subheader("🚦 Current Status")
@@ -537,7 +517,6 @@ with col_right:
         prod = current.get("product", "")
         exp = current.get("expected_color", "")
         det_best = current.get("detected_best", "")
-        fn = current.get("file", "")
         ts = current.get("timestamp", "")
         n = current.get("num_detections", "")
 
@@ -570,13 +549,13 @@ if RESULTS_CSV.exists():
     if len(last1h) == 0:
         st.info("No data in the last 1 hour yet.")
     else:
-        total = len(last1h)
+        total_1h = len(last1h)
         fail = int((last1h["status"] == "FAIL").sum())
         pass_ = int((last1h["status"] == "PASS").sum())
-        fail_rate = (fail / total) * 100 if total else 0.0
+        fail_rate = (fail / total_1h) * 100 if total_1h else 0.0
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total (1h)", total)
+        m1.metric("Total (1h)", total_1h)
         m2.metric("PASS (1h)", pass_)
         m3.metric("FAIL (1h)", fail)
         m4.metric("Fail rate (1h)", f"{fail_rate:.1f}%")
@@ -590,7 +569,7 @@ else:
 
 st.divider()
 
-# Results Log + search/filter
+# Results Log + search/filter (hide file column)
 st.subheader("🧾 Results Log")
 if RESULTS_CSV.exists():
     df = pd.read_csv(RESULTS_CSV)
@@ -610,14 +589,11 @@ if RESULTS_CSV.exists():
         view = view[view["product"] == only_product]
     if q.strip():
         qn = q.strip().lower()
-        # Search only in reason (ไม่โชว์/ไม่ค้น filename)
         view = view[view["reason"].astype(str).str.lower().str.contains(qn)]
 
-    # ซ่อนคอลัมน์ file เพื่อไม่ให้เห็นชื่อภาพ
     view_display = view.drop(columns=["file"], errors="ignore")
     st.dataframe(view_display.tail(50), use_container_width=True)
 
-    # Download CSV (ไม่ต้องมี expander เพื่อกัน indent พัง)
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="⬇️ Download results.csv",
@@ -626,4 +602,4 @@ if RESULTS_CSV.exists():
         mime="text/csv",
     )
 else:
-    st.info("No results yet. Start running and drop images into incoming/.")
+    st.info("No results yet. Upload images and press Start.")
