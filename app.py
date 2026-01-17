@@ -429,17 +429,44 @@ if st.session_state["run_mode"]:
 # ----------------------------
 # Load model
 # ----------------------------
-model = load_model_from_drive()
+import hashlib
+import gdown
 
-# class_names fallback from model
-if not class_names:
-    names = getattr(model, "names", None)
-    if isinstance(names, dict):
-        class_names = [names[k] for k in sorted(names.keys())]
-    elif isinstance(names, list):
-        class_names = names
-    else:
-        class_names = ["Blue", "Green", "White"]
+MODEL_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
+MODEL_PATH = Path("models/best.pt")
+
+def _looks_like_html(p: Path) -> bool:
+    try:
+        head = p.read_bytes()[:2000]
+        return b"<html" in head.lower() or b"google" in head.lower() and b"drive" in head.lower()
+    except Exception:
+        return False
+
+@st.cache_resource(show_spinner=True)
+def load_model_from_drive():
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # ถ้ามีไฟล์แล้วแต่เป็น HTML/ขนาดผิด ให้ลบทิ้งแล้วโหลดใหม่
+    if MODEL_PATH.exists():
+        if MODEL_PATH.stat().st_size < 1_000_000 or _looks_like_html(MODEL_PATH):
+            MODEL_PATH.unlink(missing_ok=True)
+
+    if not MODEL_PATH.exists():
+        url = f"https://drive.google.com/uc?id={MODEL_ID}"
+        # force download ไฟล์ใหญ่ (กัน confirm page)
+        gdown.download(url, str(MODEL_PATH), quiet=False, fuzzy=True)
+
+    # ตรวจอีกครั้งหลังโหลด
+    if not MODEL_PATH.exists():
+        raise RuntimeError("❌ Model file not downloaded")
+
+    if MODEL_PATH.stat().st_size < 1_000_000 or _looks_like_html(MODEL_PATH):
+        raise RuntimeError(
+            "❌ Downloaded file is not a valid .pt (looks like HTML/too small). "
+            "Check Google Drive sharing: Anyone with the link = Viewer."
+        )
+
+    return YOLO(str(MODEL_PATH))
 
 # ----------------------------
 # Processing loop (one image per refresh)
