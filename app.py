@@ -399,34 +399,33 @@ st.sidebar.divider()
 st.sidebar.caption("Copy images into **incoming/** to simulate camera snapshots.")
 
 
-# ----------------------------
-# Model loading (cached)
-# ----------------------------
+# ------------------------------
+# Model loading (Google Drive)
+# ------------------------------
+import gdown
+from pathlib import Path
+
+MODEL_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
+MODEL_PATH = Path("models/best.pt")
+
 @st.cache_resource
-def load_model(model_path_str: str):
-    import os
+def load_model_from_drive():
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    GDRIVE_FILE_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
-    LOCAL_MODEL_PATH = "best.pt"
+    # ถ้ามีไฟล์แล้ว และขนาดดูปกติ ไม่ต้องโหลดใหม่
+    if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 5_000_000:
+        return YOLO(str(MODEL_PATH))
 
-    # ถ้า path ที่ส่งเข้ามาไม่มีจริง → โหลดจาก Google Drive
-    if not os.path.exists(model_path_str):
-        if not os.path.exists(LOCAL_MODEL_PATH):
-            st.info("⬇️ Downloading model from Google Drive...")
-            url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
-            r = requests.get(url, stream=True)
-            r.raise_for_status()
-            with open(LOCAL_MODEL_PATH, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
+    url = f"https://drive.google.com/uc?id={MODEL_ID}"
+    gdown.download(url, str(MODEL_PATH), quiet=False)
 
-        model_path_str = LOCAL_MODEL_PATH
+    if not MODEL_PATH.exists() or MODEL_PATH.stat().st_size < 5_000_000:
+        raise RuntimeError("❌ Model download failed or file is corrupted")
 
-    return YOLO(model_path_str)
+    return YOLO(str(MODEL_PATH))
 
 
-model = load_model(str(model_path))
+model = load_model_from_drive()
 
 # class_names fallback from model
 if not class_names:
