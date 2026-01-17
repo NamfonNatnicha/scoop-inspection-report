@@ -384,27 +384,47 @@ if st.session_state.get("confirm_hard", False):
         if st.sidebar.button("❌ Cancel", use_container_width=True):
             st.session_state["confirm_hard"] = False
 
-# ----------------------------
-# Upload (multi) -> queue
-# ----------------------------
-st.subheader("📤 Upload images (multiple)")
-uploaded_files = st.file_uploader(
-    "Upload multiple images. The system will process them one-by-one automatically after you press Start.",
-    type=["jpg", "jpeg", "png", "bmp", "webp"],
-    accept_multiple_files=True,
-    label_visibility="collapsed",
-)
+# ============================
+# BACKEND IMAGE SOURCE (Google Drive Folder)
+# ============================
+GDRIVE_IMAGE_FOLDER_ID = "1uQr_P_sChoMffA3yFCemjM6S-Ng0B1OL"
 
-# Save new uploads to UPLOAD_DIR and add to queue (avoid duplicates)
-if uploaded_files:
-    for uf in uploaded_files:
-        ext = Path(uf.name).suffix.lower()
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        save_name = f"img_{ts}{ext}"  # DO NOT expose original filename
-        save_path = UPLOAD_DIR / save_name
-        if not save_path.exists():
-            save_path.write_bytes(uf.getbuffer())
-            st.session_state["queue_files"].append(save_name)
+BACKEND_DIR = Path("incoming")   # ใช้โฟลเดอร์ incoming เดิมได้เลย
+ensure_dirs(BACKEND_DIR)
+
+def sync_images_from_gdrive_folder(folder_id: str, local_dir: Path):
+    import gdown
+
+    before = {p.name for p in local_dir.glob("*") if p.is_file()}
+
+    tmp_dir = local_dir / "_tmp"
+    ensure_dirs(tmp_dir)
+
+    gdown.download_folder(
+        id=folder_id,
+        output=str(tmp_dir),
+        quiet=True,
+        use_cookies=False,
+    )
+
+    # ย้ายเฉพาะไฟล์รูปใหม่เข้าคิว
+    for p in tmp_dir.rglob("*"):
+        if p.is_file() and is_image_file(p):
+            if p.name not in before and not (local_dir / p.name).exists():
+                shutil.move(str(p), str(local_dir / p.name))
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+# sync ทุกครั้งที่ run (ร่วมกับ autorefresh 3s)
+if st.session_state["run_mode"]:
+    try:
+        sync_images_from_gdrive_folder(GDRIVE_IMAGE_FOLDER_ID, BACKEND_DIR)
+    except Exception as e:
+        st.warning(f"Backend sync warning: {e}")
+
+# จากนี้ใช้ flow เดิมของคุณได้เลย:
+# incoming_images = list_images_sorted(INCOMING_DIR)
+# pick_next_image_queue() ...
 
 # ----------------------------
 # Load model
