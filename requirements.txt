@@ -1,12 +1,19 @@
 streamlit
 streamlit-autorefresh
+
+# YOLO
 ultralytics==8.0.196
+
+# Torch (CPU only – compatible with Streamlit Cloud)
 torch==2.1.2
 torchvision==0.16.2
+
+# CV
 opencv-python-headless==4.8.1.78
+
+# Core
 numpy<2
 pillow
 pandas
 pyyaml
-requests
 gdown
