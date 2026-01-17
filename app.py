@@ -13,6 +13,24 @@ import pandas as pd
 from PIL import Image
 
 from ultralytics import YOLO
+import os
+import requests
+import streamlit as st
+from ultralytics import YOLO
+
+GDRIVE_FILE_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
+
+@st.cache_resource
+def load_model_from_gdrive(file_id: str, local_path: str = "best.pt"):
+    if not os.path.exists(local_path):
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        r = requests.get(url, stream=True)
+        r.raise_for_status()
+        with open(local_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+    return YOLO(local_path)
 
 
 # ----------------------------
@@ -384,13 +402,29 @@ st.sidebar.caption("Copy images into **incoming/** to simulate camera snapshots.
 # ----------------------------
 # Model loading (cached)
 # ----------------------------
-@st.cache_resource
+@@st.cache_resource
 def load_model(model_path_str: str):
+    import os
+
+    GDRIVE_FILE_ID = "1bL2AonKsPJ8KXfNpeTmbkMuVuI5mO0Th"
+    LOCAL_MODEL_PATH = "best.pt"
+
+    # ถ้า path ที่ส่งเข้ามาไม่มีจริง → โหลดจาก Google Drive
+    if not os.path.exists(model_path_str):
+        if not os.path.exists(LOCAL_MODEL_PATH):
+            st.info("⬇️ Downloading model from Google Drive...")
+            url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
+            r = requests.get(url, stream=True)
+            r.raise_for_status()
+            with open(LOCAL_MODEL_PATH, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+
+        model_path_str = LOCAL_MODEL_PATH
+
     return YOLO(model_path_str)
 
-if not model_path.exists():
-    st.error(f"❌ Model not found: {model_path}")
-    st.stop()
 
 model = load_model(str(model_path))
 
