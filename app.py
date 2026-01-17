@@ -253,8 +253,27 @@ def load_model_from_drive() -> YOLO:
     if b"<html" in head.lower():
         raise RuntimeError("Downloaded file looks like HTML. Check Drive sharing permission (Anyone with link).")
 
-    return YOLO(str(MODEL_PATH))
+    st.write("MODEL_PATH exists:", MODEL_PATH.exists())
 
+    if not MODEL_PATH.exists():
+        raise RuntimeError("Model file not found")
+
+    size_mb = round(MODEL_PATH.stat().st_size / (1024*1024), 2)
+    st.write("MODEL size (MB):", size_mb)
+
+    with open(MODEL_PATH, "rb") as f:
+    head = f.read(200)
+
+    st.write("MODEL head (first 200 bytes):", head)
+
+    # เช็คไฟล์ผิดปกติ
+    if size_mb < 1:
+       raise RuntimeError("Model file too small (likely HTML / blocked download)")
+
+    if b"<html" in head.lower():
+        raise RuntimeError("Downloaded file is HTML, not .pt (Drive permission / quota issue)")
+
+    return YOLO(str(MODEL_PATH))
 
 # ============================
 # App
