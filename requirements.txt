@@ -7,3 +7,4 @@ pillow
 pandas
 pyyaml
 requests
+gdown
