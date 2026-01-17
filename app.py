@@ -402,7 +402,7 @@ st.sidebar.caption("Copy images into **incoming/** to simulate camera snapshots.
 # ----------------------------
 # Model loading (cached)
 # ----------------------------
-@@st.cache_resource
+@st.cache_resource
 def load_model(model_path_str: str):
     import os
 
