@@ -262,7 +262,7 @@ def load_model_from_drive() -> YOLO:
     st.write("MODEL size (MB):", size_mb)
 
     with open(MODEL_PATH, "rb") as f:
-    head = f.read(200)
+        head = f.read(200)
 
     st.write("MODEL head (first 200 bytes):", head)
 
