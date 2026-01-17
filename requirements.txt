@@ -6,5 +6,4 @@ numpy<2
 pillow
 pandas
 pyyaml
-requests
 gdown
