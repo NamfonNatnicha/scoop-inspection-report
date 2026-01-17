@@ -1,0 +1,26 @@
+{
+  "Product A": {
+    "expected_color": "Blue",
+    "conf": 0.5,
+    "iou": 0.45,
+    "imgsz": 640,
+    "multiple_policy": "FAIL_IF_MULTIPLE",
+    "alert_on_no_object": false
+  },
+  "Product B": {
+    "expected_color": "Green",
+    "conf": 0.5,
+    "iou": 0.45,
+    "imgsz": 640,
+    "multiple_policy": "FAIL_IF_MULTIPLE",
+    "alert_on_no_object": false
+  },
+  "Product C": {
+    "expected_color": "White",
+    "conf": 0.55,
+    "iou": 0.45,
+    "imgsz": 640,
+    "multiple_policy": "FAIL_IF_MULTIPLE",
+    "alert_on_no_object": false
+  }
+}

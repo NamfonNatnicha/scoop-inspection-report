@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 3
+names: ['Blue', 'Green', 'White']
+
+roboflow:
+  workspace: namfon-zjgkj
+  project: is-2siip
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/namfon-zjgkj/is-2siip/dataset/1
